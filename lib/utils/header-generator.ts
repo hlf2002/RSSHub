@@ -37,6 +37,19 @@ const isValidHeader = (headers: Record<string, string>, browser: string): boolea
 // Cache for HeaderGenerator instances per preset
 const generatorCache = new Map<string, HeaderGenerator>();
 
+// 桌面浏览器池：出站请求默认从这些池里随机选一个平台/浏览器组合，
+// 避免所有抓取机都固定同一指纹（MODERN_MACOS_CHROME）形成规律；
+// 可用环境变量 RANDOM_UA_PRESET 固定为某个池（如 MODERN_MACOS_CHROME）
+const RANDOM_DESKTOP_PRESETS = [PRESETS.MODERN_MACOS_CHROME, PRESETS.MODERN_WINDOWS_CHROME, PRESETS.MODERN_LINUX_CHROME, PRESETS.MODERN_MACOS_FIREFOX, PRESETS.MODERN_WINDOWS_FIREFOX, PRESETS.MODERN_LINUX_FIREFOX];
+
+const pickDefaultPreset = (): Partial<HeaderGeneratorOptions> => {
+    const name = (process.env.RANDOM_UA_PRESET || '').toUpperCase();
+    if (name && Object.hasOwn(PRESETS, name)) {
+        return PRESETS[name as keyof typeof PRESETS];
+    }
+    return RANDOM_DESKTOP_PRESETS[Math.floor(Math.random() * RANDOM_DESKTOP_PRESETS.length)];
+};
+
 // The browsers header-generator has data for, as browserslist names them
 const browserNames = ['chrome', 'edge', 'firefox', 'safari'] as const;
 
@@ -52,7 +65,7 @@ const relaxedGenerator = ({ browserListQuery = '', ...preset }: Partial<HeaderGe
     return new HeaderGenerator(browsers.length ? { ...preset, browsers: [...browsers] } : preset);
 };
 
-export const generateHeaders = (preset: Partial<HeaderGeneratorOptions> = PRESETS.MODERN_MACOS_CHROME) => {
+export const generateHeaders = (preset: Partial<HeaderGeneratorOptions> = pickDefaultPreset()) => {
     const cacheKey = JSON.stringify(preset);
     let generator = generatorCache.get(cacheKey);
     if (!generator) {
