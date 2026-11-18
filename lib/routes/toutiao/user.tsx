@@ -1,11 +1,12 @@
 import { load } from 'cheerio';
 import { renderToString } from 'hono/jsx/dom/server';
 import { getMimeType } from 'hono/utils/mime';
+import pMap from 'p-map';
 
 import { config } from '@/config';
 import NotFoundError from '@/errors/types/not-found';
 import RejectError from '@/errors/types/reject';
-import type { Route } from '@/types';
+import type { DataItem, Route } from '@/types';
 import cache from '@/utils/cache';
 import { generateHeaders, PRESETS } from '@/utils/header-generator';
 import ofetch from '@/utils/ofetch';
@@ -84,7 +85,7 @@ async function handler(ctx) {
         throw new NotFoundError('暂未发表作品');
     }
 
-    const items = feed.map((item) => {
+    const list = feed.map((item) => {
         switch (item.cell_type) {
             case 0:
             case 49: {
@@ -103,6 +104,7 @@ async function handler(ctx) {
                         avatar: user?.info.avatar_url,
                         description: user?.info.desc,
                     },
+                    groupId: null,
                 };
             }
 
@@ -124,6 +126,7 @@ async function handler(ctx) {
                         avatar: user?.avatar_url,
                         description: user?.desc,
                     },
+                    groupId: null,
                 };
             }
 
@@ -141,9 +144,34 @@ async function handler(ctx) {
                         avatar: item.user_info?.avatar_url,
                         description: item.user_info?.description,
                     },
+                    groupId: item.id,
                 };
         }
     });
+
+    // 文本文章抓全文：列表接口的 abstract 只有第一段，正文需从详情接口取
+    const items = await pMap(
+        list,
+        async (item) => {
+            if (!item.groupId) {
+                return item;
+            }
+            const detail = await cache.tryGet<Pick<DataItem, 'description'>>(`toutiao:user:detail:${item.link}`, async () => {
+                const { data } = await ofetch<{ data: { content: string } | null }>(`https://m.toutiao.com/i${item.groupId}/info/`);
+                if (!data) {
+                    return {};
+                }
+                const $ = load(data.content, null, false);
+                $('.tt-video-box').remove();
+                return { description: $.html() };
+            });
+            return {
+                ...item,
+                description: detail.description ?? item.description,
+            };
+        },
+        { concurrency: 3, stopOnError: false }
+    );
 
     return {
         title: `${items[0].user.name}的头条主页 - 今日头条(www.toutiao.com)`,
