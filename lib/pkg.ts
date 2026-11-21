@@ -38,6 +38,23 @@ export async function request(path: RoutePath | (string & {})): Promise<Data> {
     return res.json();
 }
 
+/**
+ * Same as {@link request} but returns the rendered feed (RSS XML by default), for embedders that
+ * speak the RSSHub HTTP contract (e.g. a worker posting XML back to a scheduler).
+ * Pass `format=atom|json` to render another format.
+ */
+export async function requestXml(path: RoutePath | (string & {})): Promise<string> {
+    ensureAppInitialized(app);
+
+    const url = new URL(path, 'http://localhost');
+    if (!url.searchParams.has('format')) {
+        url.searchParams.set('format', 'rss');
+    }
+
+    const res = await app.request(url.pathname + url.search);
+    return res.text();
+}
+
 export async function registerRoute(namespace: string, route: Route, namespaceConfig?: Namespace) {
     ensureAppInitialized(app);
 

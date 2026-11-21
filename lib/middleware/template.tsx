@@ -112,7 +112,9 @@ const middleware: MiddlewareHandler = async (ctx, next) => {
         ...data,
     };
 
-    if (config.isPackage) {
+    // Package consumers get the JSON data object by default; an explicit `format` still yields the
+    // rendered feed, so embedders can obtain XML without re-implementing the views.
+    if (config.isPackage && !ctx.req.query('format')) {
         return ctx.json(result);
     }
 
