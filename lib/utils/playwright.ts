@@ -102,12 +102,12 @@ const getContextOptions = (javaScriptEnabled?: boolean): BrowserContextOptions =
     userAgent: config.ua,
 });
 
-// CDP > WS > local
-const launchBrowser = async (proxyOptions: ProxyOptions, javaScriptEnabled?: boolean) => {
+// CDP > WS > local. forceLocal bypasses the remote endpoints and launches the bundled browser.
+const launchBrowser = async (proxyOptions: ProxyOptions, javaScriptEnabled?: boolean, forceLocal = false) => {
     let browser: Browser;
-    if (config.playwrightCDPEndpoint) {
+    if (!forceLocal && config.playwrightCDPEndpoint) {
         browser = await chromium.connectOverCDP(getBrowserlessEndpoint(config.playwrightCDPEndpoint, toBrowserlessCDPLaunchOptions(proxyOptions)));
-    } else if (config.playwrightWSEndpoint) {
+    } else if (!forceLocal && config.playwrightWSEndpoint) {
         browser = await chromium.connect(getBrowserlessEndpoint(config.playwrightWSEndpoint, toBrowserlessLaunchOptions(proxyOptions)));
     } else {
         browser = await chromium.launch(getLaunchOptions(proxyOptions));
@@ -149,24 +149,17 @@ export default async function outPlaywright() {
 // No-op in Node.js environment (used by Worker build via alias)
 export const setBrowserBinding = (_binding: any) => {};
 
-/**
- * @returns Playwright page
- */
-export const getPlaywrightPage = async (
-    url: string,
-    instanceOptions: {
-        // Set to zero only when the caller always awaits destroy() in finally; the browser is still closed after MAX_CLOSE_TIMEOUT.
-        closeTimeout?: number;
-        gotoConfig?: GotoOptions;
-        noGoto?: boolean;
-        javaScriptEnabled?: boolean;
-        useConfiguredEndpoint?: boolean;
-        onBeforeLoad?: (page: Page, context?: BrowserContext) => Promise<void> | void;
-    } = {}
-) => {
-    if (instanceOptions.useConfiguredEndpoint && !config.playwrightWSEndpoint && !config.playwrightCDPEndpoint) {
-        throw new Error('Configure PLAYWRIGHT_WS_ENDPOINT or PLAYWRIGHT_CDP_ENDPOINT to use the remote Playwright browser.');
-    }
+interface PlaywrightPageOptions {
+    // Set to zero only when the caller always awaits destroy() in finally; the browser is still closed after MAX_CLOSE_TIMEOUT.
+    closeTimeout?: number;
+    gotoConfig?: GotoOptions;
+    noGoto?: boolean;
+    javaScriptEnabled?: boolean;
+    useConfiguredEndpoint?: boolean;
+    onBeforeLoad?: (page: Page, context?: BrowserContext) => Promise<void> | void;
+}
+
+const openPlaywrightPage = async (url: string, instanceOptions: PlaywrightPageOptions = {}, forceLocal = false) => {
     let allowProxy = false;
     const proxyRegex = new RegExp(proxy.proxyObj.url_regex);
     let urlHandler: URL | undefined;
@@ -183,7 +176,7 @@ export const getPlaywrightPage = async (
     const currentProxyState = allowProxy ? configuredProxy : null;
     const proxyOptions = getProxyOptions(currentProxyState);
     const hasProxy = Boolean(proxyOptions.proxy || proxyOptions.args.length);
-    const { browser, context } = await launchBrowser(proxyOptions, instanceOptions.javaScriptEnabled);
+    const { browser, context } = await launchBrowser(proxyOptions, instanceOptions.javaScriptEnabled, forceLocal);
     const closeTimer = scheduleClose(browser, instanceOptions.closeTimeout);
     const destroy = async () => {
         clearTimeout(closeTimer);
@@ -213,6 +206,29 @@ export const getPlaywrightPage = async (
     } catch (error) {
         await destroy();
         throw error;
+    }
+};
+
+/**
+ * Opens a Playwright page. Falls back to the local Chromium when the configured CDP
+ * endpoint (e.g. Obscura) fails, so browser-engine incompatibility degrades instead of
+ * breaking the route. Disable with PLAYWRIGHT_CDP_FALLBACK=false.
+ * @returns Playwright page
+ */
+export const getPlaywrightPage = async (url: string, instanceOptions: PlaywrightPageOptions = {}) => {
+    if (instanceOptions.useConfiguredEndpoint && !config.playwrightWSEndpoint && !config.playwrightCDPEndpoint) {
+        throw new Error('Configure PLAYWRIGHT_WS_ENDPOINT or PLAYWRIGHT_CDP_ENDPOINT to use the remote Playwright browser.');
+    }
+
+    try {
+        return await openPlaywrightPage(url, instanceOptions);
+    } catch (error) {
+        const canFallback = Boolean(config.playwrightCDPEndpoint) && config.playwrightCDPFallback;
+        if (!canFallback) {
+            throw error;
+        }
+        logger.warn(`Playwright CDP endpoint failed for ${url}, retrying with the local browser: ${error instanceof Error ? error.message : String(error)}`);
+        return await openPlaywrightPage(url, instanceOptions, true);
     }
 };
 

@@ -15,6 +15,7 @@ type ConfigEnvKeys =
     | 'PLAYWRIGHT_WS_ENDPOINT'
     | 'PUPPETEER_WS_ENDPOINT'
     | 'PLAYWRIGHT_CDP_ENDPOINT'
+    | 'PLAYWRIGHT_CDP_FALLBACK'
     | 'CHROMIUM_EXECUTABLE_PATH'
     | 'CI_EN_COOKIE'
     // Network
@@ -287,6 +288,7 @@ export type Config = {
     nodeName?: string;
     playwrightWSEndpoint?: string;
     playwrightCDPEndpoint?: string;
+    playwrightCDPFallback: boolean;
     chromiumExecutablePath?: string;
     // network
     connect: {
@@ -843,6 +845,7 @@ const calculateValue = () => {
         nodeName: envs.NODE_NAME,
         playwrightWSEndpoint: envs.PLAYWRIGHT_WS_ENDPOINT ?? envs.PUPPETEER_WS_ENDPOINT,
         playwrightCDPEndpoint: envs.PLAYWRIGHT_CDP_ENDPOINT,
+        playwrightCDPFallback: envs.PLAYWRIGHT_CDP_FALLBACK !== 'false',
         chromiumExecutablePath: envs.CHROMIUM_EXECUTABLE_PATH,
         // network
         connect: {
