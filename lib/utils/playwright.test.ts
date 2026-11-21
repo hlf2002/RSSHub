@@ -74,6 +74,7 @@ const resetMocks = () => {
     delete process.env.PLAYWRIGHT_WS_ENDPOINT;
     delete process.env.PUPPETEER_WS_ENDPOINT;
     delete process.env.PLAYWRIGHT_CDP_ENDPOINT;
+    delete process.env.PLAYWRIGHT_CDP_FALLBACK;
 };
 
 const initialProxyEnv = Object.fromEntries(['PROXY_URI', 'PROXY_PROTOCOL', 'PROXY_HOST', 'PROXY_PORT', 'PROXY_AUTH', 'PROXY_URL_REGEX'].map((key) => [key, process.env[key]]));
@@ -371,5 +372,31 @@ describe('getPlaywrightPage (mocked)', () => {
         } finally {
             vi.useRealTimers();
         }
+    });
+
+    it('falls back to the local browser when the CDP endpoint fails', async () => {
+        resetMocks();
+        process.env.PLAYWRIGHT_CDP_ENDPOINT = 'ws://127.0.0.1:9/devtools/browser';
+        connectOverCDP.mockRejectedValueOnce(new Error('CDP unreachable'));
+        launch.mockResolvedValueOnce(mockBrowser);
+        mockPage.goto.mockResolvedValue(undefined);
+
+        const getPlaywrightPage = await loadPlaywright();
+        const result = await getPlaywrightPage('https://example.com', { closeTimeout: 0 });
+
+        expect(connectOverCDP).toHaveBeenCalledTimes(1);
+        expect(launch).toHaveBeenCalledTimes(1);
+        expect(result.page).toBe(mockPage);
+    });
+
+    it('rethrows the CDP error when PLAYWRIGHT_CDP_FALLBACK is false', async () => {
+        resetMocks();
+        process.env.PLAYWRIGHT_CDP_ENDPOINT = 'ws://127.0.0.1:9/devtools/browser';
+        process.env.PLAYWRIGHT_CDP_FALLBACK = 'false';
+        connectOverCDP.mockRejectedValueOnce(new Error('CDP unreachable'));
+
+        const getPlaywrightPage = await loadPlaywright();
+        await expect(getPlaywrightPage('https://example.com')).rejects.toThrow('CDP unreachable');
+        expect(launch).not.toHaveBeenCalled();
     });
 });
